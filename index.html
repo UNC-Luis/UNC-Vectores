@@ -1,717 +1,878 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import * as THREE from 'three';
-import { Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2 } from 'lucide-react';
-
-const VectorApp = () => {
-  const mountRef = useRef(null);
-  const canvasRef = useRef(null);
-  const sceneRef = useRef(null);
-  const rendererRef = useRef(null);
-  const cameraRef = useRef(null);
-  const vectorObjectsRef = useRef({});
-  const [activeTab, setActiveTab] = useState('visual');
-  const [nextVectorId, setNextVectorId] = useState(3);
-  const [viewMode, setViewMode] = useState('3d'); // '3d' or '2d'
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Detect mobile device
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Vector state with predefined colors
-  const vectorColors = [0x6366f1, 0x8b5cf6, 0x06b6d4, 0xf59e0b, 0xef4444, 0x10b981, 0xf97316, 0x84cc16];
-  
-  const [vectors, setVectors] = useState({
-    1: { id: 1, name: 'A', x: 3, y: 2, z: 1, color: vectorColors[0], is2D: false, visible: true },
-    2: { id: 2, name: 'B', x: 1, y: 3, z: 2, color: vectorColors[1], is2D: false, visible: true }
-  });
-
-  // Display options
-  const [displayOptions, setDisplayOptions] = useState({
-    originalVectors: true,
-    addition: true,
-    subtraction: true,
-    parallelograms: true,
-    projections: true
-  });
-
-  // Operation results
-  const [operations, setOperations] = useState({});
-
-  // 2D Canvas drawing function
-  const draw2D = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const scale = Math.min(width, height) / 20;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-    
-    // Set white background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-
-    // Draw grid
-    ctx.strokeStyle = '#e5e7eb';
-    ctx.lineWidth = 1;
-    for (let i = -10; i <= 10; i++) {
-      // Vertical lines
-      ctx.beginPath();
-      ctx.moveTo(centerX + i * scale, 0);
-      ctx.lineTo(centerX + i * scale, height);
-      ctx.stroke();
-      
-      // Horizontal lines
-      ctx.beginPath();
-      ctx.moveTo(0, centerY + i * scale);
-      ctx.lineTo(width, centerY + i * scale);
-      ctx.stroke();
-    }
-
-    // Draw axes
-    ctx.strokeStyle = '#374151';
-    ctx.lineWidth = 2;
-    
-    // X-axis
-    ctx.beginPath();
-    ctx.moveTo(0, centerY);
-    ctx.lineTo(width, centerY);
-    ctx.stroke();
-    
-    // Y-axis
-    ctx.beginPath();
-    ctx.moveTo(centerX, 0);
-    ctx.lineTo(centerX, height);
-    ctx.stroke();
-
-    // Draw axis labels
-    ctx.fillStyle = '#374151';
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('X', width - 15, centerY - 5);
-    ctx.textAlign = 'left';
-    ctx.fillText('Y', centerX + 5, 15);
-
-    const drawArrow = (startX, startY, endX, endY, color, label, lineWidth = 3) => {
-      const headLength = 10;
-      const angle = Math.atan2(endY - startY, endX - startX);
-
-      // Draw line
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
-
-      // Draw arrowhead
-      ctx.beginPath();
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - headLength * Math.cos(angle - Math.PI/6), endY - headLength * Math.sin(angle - Math.PI/6));
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - headLength * Math.cos(angle + Math.PI/6), endY - headLength * Math.sin(angle + Math.PI/6));
-      ctx.stroke();
-
-      // Draw label
-      ctx.fillStyle = color;
-      ctx.font = 'bold 14px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(label, endX + 15, endY - 5);
-    };
-
-    const visibleVectors = Object.values(vectors).filter(v => v.visible);
-
-    // Draw original vectors
-    if (displayOptions.originalVectors) {
-      visibleVectors.forEach(vector => {
-        const endX = centerX + vector.x * scale;
-        const endY = centerY - vector.y * scale; // Flip Y for canvas coordinates
-        const color = `#${vector.color.toString(16).padStart(6, '0')}`;
-        drawArrow(centerX, centerY, endX, endY, color, vector.name);
-      });
-    }
-
-    // Draw operations for first two visible vectors
-    if (visibleVectors.length >= 2 && operations.addition) {
-      const A = visibleVectors[0];
-      const B = visibleVectors[1];
-
-      // Addition vector
-      if (displayOptions.addition) {
-        const endX = centerX + operations.addition.x * scale;
-        const endY = centerY - operations.addition.y * scale;
-        drawArrow(centerX, centerY, endX, endY, '#fbbf24', `${A.name}+${B.name}`, 2);
-      }
-
-      // Subtraction vector
-      if (displayOptions.subtraction) {
-        const endX = centerX + operations.subtraction.x * scale;
-        const endY = centerY - operations.subtraction.y * scale;
-        drawArrow(centerX, centerY, endX, endY, '#ec4899', `${A.name}-${B.name}`, 2);
-      }
-
-      // Parallelogram
-      if (displayOptions.parallelograms) {
-        const aEndX = centerX + A.x * scale;
-        const aEndY = centerY - A.y * scale;
-        const bEndX = centerX + B.x * scale;
-        const bEndY = centerY - B.y * scale;
-        const sumEndX = centerX + (A.x + B.x) * scale;
-        const sumEndY = centerY - (A.y + B.y) * scale;
-
-        ctx.strokeStyle = '#94a3b8';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(aEndX, aEndY);
-        ctx.lineTo(sumEndX, sumEndY);
-        ctx.lineTo(bEndX, bEndY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // Projections
-      if (displayOptions.projections && operations.projectionAB) {
-        const projABEndX = centerX + operations.projectionAB.x * scale;
-        const projABEndY = centerY - operations.projectionAB.y * scale;
-        drawArrow(centerX, centerY, projABEndX, projABEndY, '#06b6d4', 'proj AB', 2);
-
-        if (operations.projectionBA) {
-          const projBAEndX = centerX + operations.projectionBA.x * scale;
-          const projBAEndY = centerY - operations.projectionBA.y * scale;
-          drawArrow(centerX, centerY, projBAEndX, projBAEndY, '#f97316', 'proj BA', 2);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora Interactiva de Vectores 3D</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-      }
-    }
 
-    // Draw coordinate values
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '10px Arial';
-    ctx.textAlign = 'center';
-    for (let i = -5; i <= 5; i++) {
-      if (i !== 0) {
-        ctx.fillText(i.toString(), centerX + i * scale, centerY + 15);
-        ctx.fillText(i.toString(), centerX - 15, centerY - i * scale);
-      }
-    }
-  }, [vectors, operations, displayOptions]);
-
-  // Initialize Three.js scene
-  useEffect(() => {
-    if (!mountRef.current || viewMode !== '3d') return;
-
-    // Scene setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xffffff);
-    sceneRef.current = scene;
-
-    // Camera setup
-    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-    camera.position.set(10, 10, 10);
-    camera.lookAt(0, 0, 0);
-    cameraRef.current = camera;
-
-    // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(400, 400);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    rendererRef.current = renderer;
-
-    mountRef.current.appendChild(renderer.domElement);
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    directionalLight.position.set(10, 10, 5);
-    directionalLight.castShadow = true;
-    scene.add(directionalLight);
-
-    // Add coordinate axes
-    const axesHelper = new THREE.AxesHelper(5);
-    scene.add(axesHelper);
-
-    // Add grid
-    const gridHelper = new THREE.GridHelper(10, 10, 0xcccccc, 0xe0e0e0);
-    scene.add(gridHelper);
-
-    // Touch and mouse controls
-    let isInteracting = false;
-    let lastX = 0;
-    let lastY = 0;
-
-    const getEventPos = (event) => {
-      if (event.touches) {
-        return { x: event.touches[0].clientX, y: event.touches[0].clientY };
-      }
-      return { x: event.clientX, y: event.clientY };
-    };
-
-    const handleStart = (event) => {
-      event.preventDefault();
-      isInteracting = true;
-      const pos = getEventPos(event);
-      lastX = pos.x;
-      lastY = pos.y;
-    };
-
-    const handleEnd = (event) => {
-      event.preventDefault();
-      isInteracting = false;
-    };
-
-    const handleMove = (event) => {
-      if (!isInteracting) return;
-      event.preventDefault();
-
-      const pos = getEventPos(event);
-      const deltaX = pos.x - lastX;
-      const deltaY = pos.y - lastY;
-
-      const spherical = new THREE.Spherical();
-      spherical.setFromVector3(camera.position);
-      spherical.theta -= deltaX * 0.01;
-      spherical.phi += deltaY * 0.01;
-      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
-
-      camera.position.setFromSpherical(spherical);
-      camera.lookAt(0, 0, 0);
-
-      lastX = pos.x;
-      lastY = pos.y;
-    };
-
-    const handleWheel = (event) => {
-      event.preventDefault();
-      const scale = event.deltaY > 0 ? 1.1 : 0.9;
-      camera.position.multiplyScalar(scale);
-      camera.position.clampLength(5, 50);
-    };
-
-    // Mouse events
-    renderer.domElement.addEventListener('mousedown', handleStart);
-    renderer.domElement.addEventListener('mouseup', handleEnd);
-    renderer.domElement.addEventListener('mousemove', handleMove);
-    renderer.domElement.addEventListener('wheel', handleWheel);
-
-    // Touch events
-    renderer.domElement.addEventListener('touchstart', handleStart, { passive: false });
-    renderer.domElement.addEventListener('touchend', handleEnd, { passive: false });
-    renderer.domElement.addEventListener('touchmove', handleMove, { passive: false });
-
-    // Resize handler
-    const handleResize = () => {
-      if (!renderer || !camera) return;
-      const container = mountRef.current;
-      if (!container) return;
-      
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-    };
-
-    window.addEventListener('resize', handleResize);
-    handleResize();
-
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate);
-      if (renderer && scene && camera) {
-        renderer.render(scene, camera);
-      }
-    };
-    animate();
-
-    return () => {
-      if (mountRef.current && renderer.domElement) {
-        mountRef.current.removeChild(renderer.domElement);
-      }
-      window.removeEventListener('resize', handleResize);
-      renderer.dispose();
-    };
-  }, [viewMode]);
-
-  // Update 2D canvas when in 2D mode
-  useEffect(() => {
-    if (viewMode === '2d') {
-      draw2D();
-    }
-  }, [viewMode, vectors, operations, displayOptions, draw2D]);
-
-  // Calculate operations
-  useEffect(() => {
-    const visibleVectors = Object.values(vectors).filter(v => v.visible);
-    const newOperations = {};
-
-    if (visibleVectors.length >= 2) {
-      const A = visibleVectors[0];
-      const B = visibleVectors[1];
-
-      // Addition: A + B
-      newOperations.addition = {
-        x: A.x + B.x,
-        y: A.y + B.y,
-        z: A.z + B.z,
-        name: `${A.name} + ${B.name}`
-      };
-
-      // Subtraction: A - B
-      newOperations.subtraction = {
-        x: A.x - B.x,
-        y: A.y - B.y,
-        z: A.z - B.z,
-        name: `${A.name} - ${B.name}`
-      };
-
-      // Dot product
-      newOperations.dotProduct = A.x * B.x + A.y * B.y + A.z * B.z;
-
-      // Cross product
-      newOperations.crossProduct = {
-        x: A.y * B.z - A.z * B.y,
-        y: A.z * B.x - A.x * B.z,
-        z: A.x * B.y - A.y * B.x,
-        name: `${A.name} × ${B.name}`
-      };
-
-      // Projections
-      const dotAB = A.x * B.x + A.y * B.y + A.z * B.z;
-      const magBSquared = B.x * B.x + B.y * B.y + B.z * B.z;
-      newOperations.projectionAB = magBSquared > 0 ? {
-        x: (dotAB / magBSquared) * B.x,
-        y: (dotAB / magBSquared) * B.y,
-        z: (dotAB / magBSquared) * B.z,
-        name: `proy ${A.name} sobre ${B.name}`
-      } : { x: 0, y: 0, z: 0, name: `proy ${A.name} sobre ${B.name}` };
-
-      const dotBA = B.x * A.x + B.y * A.y + B.z * A.z;
-      const magASquared = A.x * A.x + A.y * A.y + A.z * A.z;
-      newOperations.projectionBA = magASquared > 0 ? {
-        x: (dotBA / magASquared) * A.x,
-        y: (dotBA / magASquared) * A.y,
-        z: (dotBA / magASquared) * A.z,
-        name: `proy ${B.name} sobre ${A.name}`
-      } : { x: 0, y: 0, z: 0, name: `proy ${B.name} sobre ${A.name}` };
-    }
-
-    setOperations(newOperations);
-  }, [vectors]);
-
-  // Update 3D visualization
-  useEffect(() => {
-    if (!sceneRef.current || viewMode !== '3d') return;
-
-    // Clear existing vector objects
-    Object.values(vectorObjectsRef.current).forEach(obj => {
-      sceneRef.current.remove(obj);
-    });
-    vectorObjectsRef.current = {};
-
-    const createArrow = (vector, color, opacity = 1) => {
-      const direction = new THREE.Vector3(vector.x, vector.y, vector.z);
-      const length = direction.length();
-      
-      if (length === 0) {
-        return new THREE.Group();
-      }
-      
-      direction.normalize();
-
-      const arrowHelper = new THREE.ArrowHelper(direction, new THREE.Vector3(0, 0, 0), length, color, length * 0.2, length * 0.1);
-      
-      if (arrowHelper.cone && arrowHelper.cone.material) {
-        arrowHelper.cone.material.transparent = true;
-        arrowHelper.cone.material.opacity = opacity;
-      }
-      if (arrowHelper.line && arrowHelper.line.material) {
-        arrowHelper.line.material.transparent = true;
-        arrowHelper.line.material.opacity = opacity;
-      }
-      
-      return arrowHelper;
-    };
-
-    // Original vectors
-    if (displayOptions.originalVectors) {
-      Object.values(vectors).forEach(vector => {
-        if (vector.visible) {
-          const arrow = createArrow(vector, vector.color);
-          vectorObjectsRef.current[`vector_${vector.id}`] = arrow;
-          sceneRef.current.add(arrow);
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
         }
-      });
-    }
 
-    const visibleVectors = Object.values(vectors).filter(v => v.visible);
-    
-    if (visibleVectors.length >= 2 && operations.addition) {
-      // Addition vector
-      if (displayOptions.addition) {
-        const additionArrow = createArrow(operations.addition, 0xfbbf24);
-        vectorObjectsRef.current.addition = additionArrow;
-        sceneRef.current.add(additionArrow);
-      }
-
-      // Subtraction vector
-      if (displayOptions.subtraction) {
-        const subtractionArrow = createArrow(operations.subtraction, 0xec4899);
-        vectorObjectsRef.current.subtraction = subtractionArrow;
-        sceneRef.current.add(subtractionArrow);
-      }
-
-      // Parallelogram
-      if (displayOptions.parallelograms) {
-        const A = visibleVectors[0];
-        const B = visibleVectors[1];
-        const geometry = new THREE.BufferGeometry();
-        const vertices = new Float32Array([
-          0, 0, 0,
-          A.x, A.y, A.z,
-          A.x + B.x, A.y + B.y, A.z + B.z,
-          B.x, B.y, B.z,
-          0, 0, 0
-        ]);
-        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        
-        const material = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.6 });
-        vectorObjectsRef.current.parallelogram = new THREE.Line(geometry, material);
-        sceneRef.current.add(vectorObjectsRef.current.parallelogram);
-      }
-
-      // Projections
-      if (displayOptions.projections) {
-        if (operations.projectionAB) {
-          const projAB = createArrow(operations.projectionAB, 0x06b6d4, 0.8);
-          vectorObjectsRef.current.projectionAB = projAB;
-          sceneRef.current.add(projAB);
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 10px;
         }
-        if (operations.projectionBA) {
-          const projBA = createArrow(operations.projectionBA, 0xf97316, 0.8);
-          vectorObjectsRef.current.projectionBA = projBA;
-          sceneRef.current.add(projBA);
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 20px;
         }
-      }
-    }
-  }, [vectors, operations, displayOptions, viewMode]);
 
-  // Canvas resize handler for 2D mode
-  useEffect(() => {
-    if (viewMode === '2d' && canvasRef.current) {
-      const canvas = canvasRef.current;
-      const container = canvas.parentElement;
-      const resizeCanvas = () => {
-        const rect = container.getBoundingClientRect();
-        canvas.width = rect.width;
-        canvas.height = Math.min(rect.height, 600);
-        draw2D();
-      };
-      
-      resizeCanvas();
-      window.addEventListener('resize', resizeCanvas);
-      return () => window.removeEventListener('resize', resizeCanvas);
-    }
-  }, [viewMode, draw2D]);
+        .header h1 {
+            font-size: clamp(1.5em, 4vw, 2.5em);
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
 
-  const addVector = () => {
-    const newId = nextVectorId;
-    const colorIndex = (newId - 1) % vectorColors.length;
-    const vectorName = String.fromCharCode(65 + (newId - 1));
-    
-    setVectors(prev => ({
-      ...prev,
-      [newId]: {
-        id: newId,
-        name: vectorName,
-        x: Math.random() * 4 - 2,
-        y: Math.random() * 4 - 2,
-        z: Math.random() * 4 - 2,
-        color: vectorColors[colorIndex],
-        is2D: false,
-        visible: true
-      }
-    }));
-    setNextVectorId(newId + 1);
-  };
+        .header p {
+            font-size: clamp(0.9em, 2.5vw, 1.2em);
+            opacity: 0.9;
+        }
 
-  const removeVector = (id) => {
-    if (Object.keys(vectors).length <= 2) return;
-    
-    setVectors(prev => {
-      const newVectors = { ...prev };
-      delete newVectors[id];
-      return newVectors;
-    });
-  };
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 300px 300px;
+            gap: 15px;
+            min-height: 80vh;
+        }
 
-  const updateVector = (id, component, value) => {
-    setVectors(prev => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        [component]: parseFloat(value) || 0
-      }
-    }));
-  };
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr 250px;
+                grid-template-rows: 60vh auto;
+            }
+            
+            .results-panel {
+                grid-column: 1 / -1;
+            }
+        }
 
-  const toggle2D = (id) => {
-    setVectors(prev => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        is2D: !prev[id].is2D,
-        z: !prev[id].is2D ? 0 : prev[id].z
-      }
-    }));
-  };
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                grid-template-rows: 50vh auto auto;
+                gap: 10px;
+            }
+            
+            .container {
+                padding: 5px;
+            }
+        }
 
-  const toggleVisibility = (id) => {
-    setVectors(prev => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        visible: !prev[id].visible
-      }
-    }));
-  };
+        .controls-panel, .results-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow-y: auto;
+            max-height: 80vh;
+        }
 
-  const toggleDisplayOption = (option) => {
-    setDisplayOptions(prev => ({
-      ...prev,
-      [option]: !prev[option]
-    }));
-  };
+        .visualization-container {
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            position: relative;
+            min-height: 400px;
+        }
 
-  const selectAllOptions = () => {
-    setDisplayOptions({
-      originalVectors: true,
-      addition: true,
-      subtraction: true,
-      parallelograms: true,
-      projections: true
-    });
-  };
+        .section-title {
+            font-size: clamp(1em, 2.5vw, 1.3em);
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 8px;
+        }
 
-  const deselectAllOptions = () => {
-    setDisplayOptions({
-      originalVectors: false,
-      addition: false,
-      subtraction: false,
-      parallelograms: false,
-      projections: false
-    });
-  };
+        .vector-input {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 2px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
-      <div className={`w-full ${isFullscreen ? '' : 'max-w-7xl'} mx-auto p-3 md:p-6`}>
-        <div className="text-center mb-4 md:mb-8">
-          <h1 className="text-2xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            Generador de Vectores 3D
-          </h1>
-          <p className="text-sm md:text-base text-gray-600">Herramienta interactiva para visualizar y calcular operaciones vectoriales</p>
-        </div>
-        
-        {/* Tab Navigation */}
-        <div className="mb-4 md:mb-6">
-          <div className="flex space-x-1 md:space-x-2 bg-white rounded-lg p-1 shadow-sm border border-gray-200 max-w-md mx-auto">
-            <button
-              onClick={() => setActiveTab('visual')}
-              className={`flex-1 px-3 md:px-6 py-2 md:py-3 rounded-md font-medium transition-all text-sm md:text-base ${
-                activeTab === 'visual' 
-                  ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-md' 
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-              }`}
-            >
-              Visualización
-            </button>
-            <button
-              onClick={() => setActiveTab('algebra')}
-              className={`flex-1 px-3 md:px-6 py-2 md:py-3 rounded-md font-medium transition-all text-sm md:text-base ${
-                activeTab === 'algebra' 
-                  ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-md' 
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-              }`}
-            >
-              Álgebra
-            </button>
-          </div>
+        .vector-input:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .vector-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .vector-label {
+            font-weight: bold;
+            color: #2d3748;
+            font-size: clamp(0.9em, 2vw, 1em);
+        }
+
+        .add-vector-btn, .delete-vector-btn {
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: clamp(10px, 2vw, 12px);
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .add-vector-btn {
+            background: #48bb78;
+            color: white;
+            margin-bottom: 15px;
+        }
+
+        .delete-vector-btn {
+            background: #f56565;
+            color: white;
+            padding: 4px 8px;
+        }
+
+        .coordinate-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+        }
+
+        .coord-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .coord-label {
+            font-size: clamp(0.8em, 2vw, 0.9em);
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 5px;
+        }
+
+        input[type="number"], select {
+            width: 100%;
+            padding: 6px;
+            border: 2px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: clamp(12px, 2.5vw, 16px);
+            text-align: center;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        input[type="number"]:focus, select:focus {
+            border-color: #667eea;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: clamp(10px, 2vw, 14px);
+        }
+
+        .mode-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .mode-btn:not(.active) {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .operation-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 15px;
+        }
+
+        .op-btn {
+            padding: 10px 5px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: clamp(10px, 2vw, 12px);
+            text-align: center;
+        }
+
+        .op-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .op-btn.suma { background: #48bb78; color: white; }
+        .op-btn.resta { background: #ed8936; color: white; }
+        .op-btn.escalar { background: #9f7aea; color: white; }
+        .op-btn.cruz { background: #f56565; color: white; }
+        .op-btn.magnitud { background: #38b2ac; color: white; }
+        .op-btn.clear { background: #a0aec0; color: white; }
+
+        .result-section {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-title {
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: clamp(0.9em, 2vw, 1em);
+        }
+
+        .result-value {
+            font-family: 'Courier New', monospace;
+            background: white;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 8px;
+            font-size: clamp(11px, 2vw, 14px);
+            word-break: break-all;
+        }
+
+        .algebra-steps {
+            background: white;
+            border-radius: 6px;
+            padding: 8px;
+            border: 1px solid #e2e8f0;
+            font-family: 'Courier New', monospace;
+            font-size: clamp(10px, 2vw, 12px);
+            line-height: 1.4;
+        }
+
+        .algebra-step {
+            margin-bottom: 6px;
+            padding: 4px;
+            border-left: 3px solid #667eea;
+            padding-left: 8px;
+            word-break: break-all;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+            overflow: hidden;
+            min-height: 300px;
+        }
+
+        .canvas-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border-radius: 8px;
+            font-size: clamp(9px, 2vw, 11px);
+            line-height: 1.3;
+        }
+
+        .vector-info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border-radius: 8px;
+            font-size: clamp(9px, 2vw, 11px);
+            max-width: 180px;
+            line-height: 1.3;
+            word-break: break-all;
+        }
+
+        @media (max-width: 480px) {
+            .operation-buttons {
+                grid-template-columns: 1fr;
+            }
+            
+            .mode-toggle {
+                flex-direction: column;
+            }
+            
+            .canvas-controls, .vector-info {
+                position: relative;
+                top: auto;
+                left: auto;
+                right: auto;
+                margin-bottom: 10px;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Calculadora Interactiva de Vectores 3D</h1>
+            <p>Explora y aprende álgebra vectorial con visualizaciones interactivas</p>
         </div>
 
-        {activeTab === 'visual' && (
-          <div className={`grid ${isMobile ? 'grid-cols-1 gap-4' : 'grid-cols-1 lg:grid-cols-3 gap-6'}`}>
-            {/* Controls */}
-            <div className={`space-y-4 md:space-y-6 ${isMobile ? 'order-2' : ''}`}>
-              {/* Vector Controls */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 md:p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base md:text-lg font-semibold text-gray-800">Control de Vectores</h3>
-                  <button
-                    onClick={addVector}
-                    className="flex items-center space-x-1 md:space-x-2 px-2 md:px-3 py-1.5 md:py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-md hover:from-blue-600 hover:to-purple-600 transition-all text-sm"
-                  >
-                    <Plus size={14} />
-                    <span className="hidden md:inline">Agregar</span>
-                    <span className="md:hidden">+</span>
-                  </button>
+        <div class="main-content">
+            <!-- Visualización 3D -->
+            <div class="visualization-container">
+                <div id="canvas-container"></div>
+                <div class="canvas-controls">
+                    <strong>Controles:</strong><br>
+                    🖱️ Arrastrar: Rotar<br>
+                    🔄 Rueda: Zoom
                 </div>
+                <div class="vector-info" id="vector-info">
+                    <strong>Vectores Activos</strong><br>
+                    Vector A: (3, 2, 1)<br>
+                    Vector B: (1, 4, 2)
+                </div>
+            </div>
+
+            <!-- Panel de Controles -->
+            <div class="controls-panel">
+                <div class="section-title">⚙️ Controles</div>
                 
-                <div className="space-y-3 md:space-y-4">
-                  {Object.values(vectors).map((vector) => (
-                    <div key={vector.id} className="p-3 md:p-4 bg-gray-50 rounded-lg border border-gray-100">
-                      <div className="flex items-center justify-between mb-2 md:mb-3">
-                        <div className="flex items-center space-x-2 md:space-x-3">
-                          <div 
-                            className="w-3 h-3 md:w-4 md:h-4 rounded-full shadow-sm"
-                            style={{ backgroundColor: `#${vector.color.toString(16).padStart(6, '0')}` }}
-                          ></div>
-                          <h4 className="font-medium text-gray-800 text-sm md:text-base">Vector {vector.name}</h4>
+                <div class="mode-toggle">
+                    <button class="mode-btn active" id="mode-3d">3D</button>
+                    <button class="mode-btn" id="mode-2d">2D</button>
+                </div>
+
+                <button class="add-vector-btn" onclick="addVector()">➕ Agregar Vector</button>
+
+                <div id="vectors-container">
+                    <div class="vector-input" data-vector="A">
+                        <div class="vector-title">
+                            <label class="vector-label">Vector A</label>
+                            <button class="delete-vector-btn" onclick="deleteVector('A')" style="display: none;">🗑️</button>
                         </div>
-                        <div className="flex items-center space-x-1 md:space-x-2">
-                          <button
-                            onClick={() => toggleVisibility(vector.id)}
-                            className={`p-1 md:p-1.5 rounded text-xs md:text-sm ${vector.visible ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-400 hover:bg-gray-100'}`}
-                          >
-                            {vector.visible ? <Eye size={isMobile ? 14 : 16} /> : <EyeOff size={isMobile ? 14 : 16} />}
-                          </button>
-                          <button
-                            onClick={() => toggle2D(vector.id)}
-                            className={`px-2 md:px-3 py-1 rounded text-xs md:text-sm font-medium transition-all ${
-                              vector.is2D 
-                                ? 'bg-blue-100 text-blue-700 border border-blue-200' 
-                                : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
-                            }`}
-                          >
-                            2D
-                          </button>
-                          {Object.keys(vectors).length > 2 && (
-                            <button
-                              onClick={() => removeVector(vector.id)}
-                              className="p-1 md:p-1.5 text-red-500 hover:bg-red-50 rounded"
-                            >
-                              <Trash2 size={isMobile ? 14 : 16} />
-                            </button>
-                          )}
+                        <div class="coordinate-inputs">
+                            <div class="coord-group">
+                                <span class="coord-label">X</span>
+                                <input type="number" id="ax" value="3" step="0.1">
+                            </div>
+                            <div class="coord-group">
+                                <span class="coord-label">Y</span>
+                                <input type="number" id="ay" value="2" step="0.1">
+                            </div>
+                            <div class="coord-group">
+                                <span class="coord-label">Z</span>
+                                <input type="number" id="az" value="1" step="0.1">
+                            </div>
                         </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-3 gap-1 md:gap-2">
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 mb-1 block">X</label>
+                    </div>
+
+                    <div class="vector-input" data-vector="B">
+                        <div class="vector-title">
+                            <label class="vector-label">Vector B</label>
+                            <button class="delete-vector-btn" onclick="deleteVector('B')" style="display: none;">🗑️</button>
+                        </div>
+                        <div class="coordinate-inputs">
+                            <div class="coord-group">
+                                <span class="coord-label">X</span>
+                                <input type="number" id="bx" value="1" step="0.1">
+                            </div>
+                            <div class="coord-group">
+                                <span class="coord-label">Y</span>
+                                <input type="number" id="by" value="4" step="0.1">
+                            </div>
+                            <div class="coord-group">
+                                <span class="coord-label">Z</span>
+                                <input type="number" id="bz" value="2" step="0.1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin: 15px 0;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 8px; font-size: clamp(0.8em, 2vw, 0.9em);">🎯 Seleccionar Vectores:</label>
+                    <select id="vector1-select" style="margin-bottom: 8px;">
+                        <option value="A">Vector A</option>
+                        <option value="B">Vector B</option>
+                    </select>
+                    <select id="vector2-select">
+                        <option value="A">Vector A</option>
+                        <option value="B" selected>Vector B</option>
+                    </select>
+                </div>
+
+                <div class="operation-buttons">
+                    <button class="op-btn suma" onclick="performOperation('suma')">➕ Suma</button>
+                    <button class="op-btn resta" onclick="performOperation('resta')">➖ Resta</button>
+                    <button class="op-btn escalar" onclick="performOperation('escalar')">⚫ Escalar</button>
+                    <button class="op-btn cruz" onclick="performOperation('cruz')">✖️ Cruz</button>
+                    <button class="op-btn magnitud" onclick="performOperation('magnitud')">📏 Magnitud</button>
+                    <button class="op-btn clear" onclick="clearResults()">🗑️ Limpiar</button>
+                </div>
+            </div>
+
+            <!-- Panel de Resultados -->
+            <div class="results-panel">
+                <div class="section-title">📊 Resultados y Álgebra</div>
+                <div id="results-container">
+                    <div class="result-section">
+                        <div class="result-title">🔢 Selecciona vectores y una operación</div>
+                        <p style="color: #666; font-style: italic; font-size: clamp(10px, 2vw, 14px);">Los resultados y pasos algebraicos aparecerán aquí.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer;
+        let vectors = { A: null, B: null };
+        let vectorArrows = {};
+        let vectorColors = ['#ff4444', '#4444ff', '#44ff44', '#ff44ff', '#ffff44', '#44ffff', '#ff8844', '#8844ff'];
+        let vectorLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        let is2DMode = false;
+        let vectorArrowResult;
+        let parallelogram;
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+            
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(8, 8, 8);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            
+            setupOrbitControls();
+            
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 10, 5);
+            scene.add(directionalLight);
+            
+            const axesHelper = new THREE.AxesHelper(10);
+            scene.add(axesHelper);
+            
+            const gridHelper = new THREE.GridHelper(20, 20, 0x888888, 0xcccccc);
+            scene.add(gridHelper);
+            
+            updateVectors();
+            animate();
+            
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function setupOrbitControls() {
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+            
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+            
+            renderer.domElement.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+                
+                const spherical = new THREE.Spherical();
+                spherical.setFromVector3(camera.position);
+                
+                spherical.theta -= deltaMove.x * 0.01;
+                spherical.phi += deltaMove.y * 0.01;
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                
+                camera.position.setFromSpherical(spherical);
+                camera.lookAt(0, 0, 0);
+                
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+            
+            renderer.domElement.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+            
+            renderer.domElement.addEventListener('wheel', (e) => {
+                const scale = e.deltaY > 0 ? 1.1 : 0.9;
+                camera.position.multiplyScalar(scale);
+                e.preventDefault();
+            });
+        }
+
+        function createArrow(start, end, color) {
+            const direction = new THREE.Vector3().subVectors(end, start);
+            const length = direction.length();
+            
+            if (length === 0) return null;
+            
+            direction.normalize();
+            const arrowHelper = new THREE.ArrowHelper(direction, start, length, color, length * 0.2, length * 0.1);
+            return arrowHelper;
+        }
+
+        function updateVectors() {
+            Object.values(vectorArrows).forEach(arrow => {
+                if (arrow) scene.remove(arrow);
+            });
+            if (vectorArrowResult) scene.remove(vectorArrowResult);
+            if (parallelogram) scene.remove(parallelogram);
+            
+            vectorArrows = {};
+            
+            const vectorInputs = document.querySelectorAll('.vector-input');
+            vectorInputs.forEach((input, index) => {
+                const letter = input.dataset.vector;
+                const x = parseFloat(input.querySelector(`#${letter.toLowerCase()}x`).value) || 0;
+                const y = parseFloat(input.querySelector(`#${letter.toLowerCase()}y`).value) || 0;
+                const z = is2DMode ? 0 : (parseFloat(input.querySelector(`#${letter.toLowerCase()}z`).value) || 0);
+                
+                vectors[letter] = new THREE.Vector3(x, y, z);
+                
+                const origin = new THREE.Vector3(0, 0, 0);
+                const color = vectorColors[index % vectorColors.length];
+                vectorArrows[letter] = createArrow(origin, vectors[letter], color);
+                if (vectorArrows[letter]) scene.add(vectorArrows[letter]);
+            });
+            
+            updateVectorInfo();
+            updateVectorSelectors();
+        }
+
+        function updateVectorSelectors() {
+            const select1 = document.getElementById('vector1-select');
+            const select2 = document.getElementById('vector2-select');
+            
+            const currentValues = [select1.value, select2.value];
+            
+            select1.innerHTML = '';
+            select2.innerHTML = '';
+            
+            Object.keys(vectors).forEach(letter => {
+                const option1 = new Option(`Vector ${letter}`, letter);
+                const option2 = new Option(`Vector ${letter}`, letter);
+                select1.add(option1);
+                select2.add(option2);
+            });
+            
+            if (currentValues[0] && vectors[currentValues[0]]) select1.value = currentValues[0];
+            if (currentValues[1] && vectors[currentValues[1]]) select2.value = currentValues[1];
+        }
+
+        function updateVectorInfo() {
+            const infoContainer = document.getElementById('vector-info');
+            let infoHTML = '<strong>Vectores Activos</strong><br>';
+            
+            Object.entries(vectors).forEach(([letter, vector]) => {
+                infoHTML += `Vector ${letter}: (${vector.x.toFixed(1)}, ${vector.y.toFixed(1)}, ${vector.z.toFixed(1)})<br>`;
+            });
+            
+            infoContainer.innerHTML = infoHTML;
+        }
+
+        function addVector() {
+            const existingVectors = Object.keys(vectors);
+            let newLetter = null;
+            
+            for (let letter of vectorLetters) {
+                if (!existingVectors.includes(letter)) {
+                    newLetter = letter;
+                    break;
+                }
+            }
+            
+            if (!newLetter) {
+                alert('Máximo 8 vectores permitidos');
+                return;
+            }
+            
+            const container = document.getElementById('vectors-container');
+            const vectorHTML = `
+                <div class="vector-input" data-vector="${newLetter}">
+                    <div class="vector-title">
+                        <label class="vector-label">Vector ${newLetter}</label>
+                        <button class="delete-vector-btn" onclick="deleteVector('${newLetter}')">🗑️</button>
+                    </div>
+                    <div class="coordinate-inputs">
+                        <div class="coord-group">
+                            <span class="coord-label">X</span>
+                            <input type="number" id="${newLetter.toLowerCase()}x" value="0" step="0.1">
+                        </div>
+                        <div class="coord-group">
+                            <span class="coord-label">Y</span>
+                            <input type="number" id="${newLetter.toLowerCase()}y" value="0" step="0.1">
+                        </div>
+                        <div class="coord-group">
+                            <span class="coord-label">Z</span>
+                            <input type="number" id="${newLetter.toLowerCase()}z" value="0" step="0.1" ${is2DMode ? 'disabled' : ''}>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.insertAdjacentHTML('beforeend', vectorHTML);
+            
+            ['x', 'y', 'z'].forEach(coord => {
+                document.getElementById(`${newLetter.toLowerCase()}${coord}`).addEventListener('input', updateVectors);
+            });
+            
+            updateDeleteButtons();
+            updateVectors();
+        }
+
+        function deleteVector(letter) {
+            if (Object.keys(vectors).length <= 2) {
+                alert('Debe mantener al menos 2 vectores');
+                return;
+            }
+            
+            const vectorElement = document.querySelector(`[data-vector="${letter}"]`);
+            if (vectorElement) vectorElement.remove();
+            
+            if (vectorArrows[letter]) {
+                scene.remove(vectorArrows[letter]);
+                delete vectorArrows[letter];
+            }
+            
+            delete vectors[letter];
+            updateDeleteButtons();
+            updateVectors();
+        }
+
+        function updateDeleteButtons() {
+            const deleteButtons = document.querySelectorAll('.delete-vector-btn');
+            const vectorCount = Object.keys(vectors).length;
+            
+            deleteButtons.forEach(btn => {
+                btn.style.display = vectorCount > 2 ? 'inline-block' : 'none';
+            });
+        }
+
+        function showResultVector(vector, color) {
+            if (vectorArrowResult) scene.remove(vectorArrowResult);
+            
+            const origin = new THREE.Vector3(0, 0, 0);
+            vectorArrowResult = createArrow(origin, vector, color);
+            if (vectorArrowResult) scene.add(vectorArrowResult);
+        }
+
+        function showParallelogram(vector1, vector2) {
+            if (parallelogram) scene.remove(parallelogram);
+            
+            const points = [
+                new THREE.Vector3(0, 0, 0),
+                vector1.clone(),
+                new THREE.Vector3().addVectors(vector1, vector2),
+                vector2.clone(),
+                new THREE.Vector3(0, 0, 0)
+            ];
+            
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.6 });
+            parallelogram = new THREE.Line(geometry, material);
+            scene.add(parallelogram);
+        }
+
+        function getOperationName(operation) {
+            const names = {
+                'suma': 'Suma de Vectores',
+                'resta': 'Resta de Vectores',
+                'cruz': 'Producto Cruz'
+            };
+            return names[operation] || operation;
+        }
+
+        function displayResults(title, result, steps, extra = '') {
+            const container = document.getElementById('results-container');
+            container.innerHTML = `
+                <div class="result-section">
+                    <div class="result-title">📊 ${title}</div>
+                    <div class="result-value">${result}</div>
+                    ${extra ? `<div style="color: #666; font-style: italic; margin-top: 10px;">${extra}</div>` : ''}
+                    <div class="algebra-steps">
+                        <strong>Pasos algebraicos:</strong><br>
+                        ${steps.map(step => `<div class="algebra-step">${step}</div>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function performOperation(operation) {
+            const vector1Letter = document.getElementById('vector1-select').value;
+            const vector2Letter = document.getElementById('vector2-select').value;
+            
+            const vector1 = vectors[vector1Letter];
+            const vector2 = vectors[vector2Letter];
+            
+            if (!vector1 || !vector2) {
+                alert('Selecciona vectores válidos');
+                return;
+            }
+            
+            let result, steps, extra = '';
+            
+            switch(operation) {
+                case 'suma':
+                    result = new THREE.Vector3().addVectors(vector1, vector2);
+                    steps = [
+                        `${vector1Letter} + ${vector2Letter} = (${vector1.x}, ${vector1.y}, ${vector1.z}) + (${vector2.x}, ${vector2.y}, ${vector2.z})`,
+                        `Resultado = (${result.x.toFixed(2)}, ${result.y.toFixed(2)}, ${result.z.toFixed(2)})`
+                    ];
+                    showResultVector(result, '#00ff00');
+                    break;
+                    
+                case 'resta':
+                    result = new THREE.Vector3().subVectors(vector1, vector2);
+                    steps = [
+                        `${vector1Letter} - ${vector2Letter} = (${vector1.x}, ${vector1.y}, ${vector1.z}) - (${vector2.x}, ${vector2.y}, ${vector2.z})`,
+                        `Resultado = (${result.x.toFixed(2)}, ${result.y.toFixed(2)}, ${result.z.toFixed(2)})`
+                    ];
+                    showResultVector(result, '#ff8800');
+                    break;
+                    
+                case 'escalar':
+                    const dot = vector1.dot(vector2);
+                    steps = [
+                        `${vector1Letter} · ${vector2Letter} = (${vector1.x})(${vector2.x}) + (${vector1.y})(${vector2.y}) + (${vector1.z})(${vector2.z})`,
+                        `= ${(vector1.x * vector2.x).toFixed(2)} + ${(vector1.y * vector2.y).toFixed(2)} + ${(vector1.z * vector2.z).toFixed(2)}`,
+                        `= ${dot.toFixed(3)}`
+                    ];
+                    
+                    const magnitude1 = vector1.length();
+                    const magnitude2 = vector2.length();
+                    const angle = Math.acos(Math.abs(dot) / (magnitude1 * magnitude2)) * 180 / Math.PI;
+                    extra = `Ángulo entre vectores: ${angle.toFixed(2)}°`;
+                    
+                    displayResults('Producto Escalar', dot.toFixed(3), steps, extra);
+                    return;
+                    
+                case 'cruz':
+                    result = new THREE.Vector3().crossVectors(vector1, vector2);
+                    const area = result.length();
+                    steps = [
+                        `${vector1Letter} × ${vector2Letter} = Producto Cruz`,
+                        `i(${vector1.y}×${vector2.z} - ${vector1.z}×${vector2.y}) - j(${vector1.x}×${vector2.z} - ${vector1.z}×${vector2.x}) + k(${vector1.x}×${vector2.y} - ${vector1.y}×${vector2.x})`,
+                        `= (${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)})`
+                    ];
+                    extra = `Área del paralelogramo: ${area.toFixed(3)} unidades²`;
+                    showResultVector(result, '#ff00ff');
+                    showParallelogram(vector1, vector2);
+                    break;
+                    
+                case 'magnitud':
+                    const mag1 = vector1.length();
+                    const mag2 = vector2.length();
+                    steps = [
+                        `|${vector1Letter}| = √(${vector1.x}² + ${vector1.y}² + ${vector1.z}²) = ${mag1.toFixed(3)}`,
+                        `|${vector2Letter}| = √(${vector2.x}² + ${vector2.y}² + ${vector2.z}²) = ${mag2.toFixed(3)}`
+                    ];
+                    displayResults('Magnitudes', `|${vector1Letter}| = ${mag1.toFixed(3)}<br>|${vector2Letter}| = ${mag2.toFixed(3)}`, steps);
+                    return;
+            }
+            
+            if (result) {
+                displayResults(getOperationName(operation), `(${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)})`, steps, extra);
+            }
+        }
+
+        function clearResults() {
+            if (vectorArrowResult) scene.remove(vectorArrowResult);
+            if (parallelogram) scene.remove(parallelogram);
+            
+            document.getElementById('results-container').innerHTML = `
+                <div class="result-section">
+                    <div class="result-title">🔢 Selecciona vectores y una operación</div>
+                    <p style="color: #666; font-style: italic; font-size: clamp(10px, 2vw, 14px);">Los resultados y pasos algebraicos aparecerán aquí.</p>
+                </div>
+            `;
+        }
+
+        function toggleMode(mode) {
+            is2DMode = (mode === '2d');
+            
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`mode-${mode}`).classList.add('active');
+            
+            const zInputs = document.querySelectorAll('input[id$="z"]');
+            zInputs.forEach(input => {
+                input.disabled = is2DMode;
+                if (is2DMode) input.value = 0;
+            });
+            
+            if (is2DMode) {
+                camera.position.set(0, 0, 15);
+                camera.lookAt(0, 0, 0);
+            } else {
+                camera.position.set(8, 8, 8);
+            }
+            
+            updateVectors();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function addInputListeners() {
+            const inputs = document.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => {
+                input.addEventListener('input', updateVectors);
+            });
+        }
+
+        // Event listeners
+        document.getElementById('mode-3d').addEventListener('click', () => toggleMode('3d'));
+        document.getElementById('mode-2d').addEventListener('click', () => toggleMode('2d'));
+
+        // Inicializar
+        window.addEventListener('load', () => {
+            initThreeJS();
+            addInputListeners();
+        });
+    </script>
+</body>
+</html>
